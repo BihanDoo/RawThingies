@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const db = require('../server/db');
 const { deploy } = require('../server/deploy');
+const appTypes = require('../server/app-types/registry');
 const { spawnSync } = require('child_process');
 
 async function main() {
@@ -24,11 +25,14 @@ async function main() {
         if (!parsed.name || !parsed.type || !parsed.domain) {
           throw new Error('Missing required arguments: --name, --type, --domain');
         }
-        
+
+        const plugin = appTypes[parsed.type];
+        if (!plugin) throw new Error(`Unknown app type: ${parsed.type}`);
+
         const apps = await db.getAppsCollection();
         const existing = await apps.findOne({ name: parsed.name });
         if (existing) {
-          throw new Error(\`App \${parsed.name} already exists\`);
+          throw new Error(`App ${parsed.name} already exists`);
         }
 
         const newApp = {
@@ -42,8 +46,13 @@ async function main() {
           updatedAt: new Date()
         };
 
+        // One-time provisioning (e.g. port allocation) happens now, not on every deploy.
+        if (plugin.provision) {
+          await plugin.provision(newApp, {});
+        }
+
         await apps.insertOne(newApp);
-        console.log(\`App \${newApp.name} created successfully.\`);
+        console.log(`App ${newApp.name} created successfully.`);
       } else if (args[1] === 'list') {
         const apps = await db.getAppsCollection();
         const list = await apps.find().toArray();
@@ -53,14 +62,14 @@ async function main() {
           console.table(list.map(a => ({ Name: a.name, Type: a.type, Domain: a.domain })));
         }
       } else {
-        console.log(\`Unknown sub-command for apps: \${args[1]}\`);
+        console.log(`Unknown sub-command for apps: ${args[1]}`);
       }
     } else if (command === 'deploy') {
       const name = args[1];
       if (!name) throw new Error('Missing app name: raw deploy <name>');
       const apps = await db.getAppsCollection();
       const app = await apps.findOne({ name });
-      if (!app) throw new Error(\`App \${name} not found\`);
+      if (!app) throw new Error(`App ${name} not found`);
 
       // Mock context with empty environment variables for now
       // In a real flow, fetch and decrypt from vault here
@@ -72,19 +81,19 @@ async function main() {
     } else if (command === 'logs') {
       const name = args[1];
       if (!name) throw new Error('Missing app name: raw logs <name>');
-      
+
       const parsed = parseArgs(args.slice(2));
       const pm2Args = ['logs', name];
       if (!parsed.follow) {
         pm2Args.push('--nostream');
       }
-      
+
       spawnSync('pm2', pm2Args, { stdio: 'inherit' });
     } else {
-      console.log(\`Unknown command: \${command}\`);
+      console.log(`Unknown command: ${command}`);
     }
   } catch (err) {
-    console.error(\`Error: \${err.message}\`);
+    console.error(`Error: ${err.message}`);
   } finally {
     await db.close();
   }

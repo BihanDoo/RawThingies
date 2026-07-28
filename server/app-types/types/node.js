@@ -14,12 +14,12 @@ module.exports = {
   async provision(app, ctx) {
     // Initialize config if it doesn't exist
     if (!app.config) app.config = {};
-    
+
     // Assign a default port if not provided (Simplistic allocation for now)
     if (!app.config.port) {
       // Find a port between 3000 and 4000 based on some deterministic or random way.
       // In a real app, this should query the DB for used ports to ensure no collision.
-      app.config.port = 3000 + Math.floor(Math.random() * 1000); 
+      app.config.port = 3000 + Math.floor(Math.random() * 1000);
     }
   },
 
@@ -50,8 +50,8 @@ module.exports = {
         if (err) return reject(err);
 
         const sharedPath = path.join('/var/www/apps', app.name, 'shared');
-        const startCommand = app.config.startCommand || 'npm start'; 
-        
+        const startCommand = app.config.startCommand || 'npm start';
+
         // Ensure logs directory exists
         const logsDir = path.join(sharedPath, 'logs');
         if (!fs.existsSync(logsDir)) {
@@ -110,17 +110,17 @@ module.exports = {
   async healthCheck(app, ctx) {
     const port = app.config.port;
     const checkPath = app.healthCheckPath || '/';
-    
+
     // Retry logic since the app might take a few seconds to bind
     let retries = 5;
-    
+
     const tryFetch = () => {
       return new Promise((resolve, reject) => {
-        const req = http.get(\`http://127.0.0.1:\${port}\${checkPath}\`, (res) => {
+        const req = http.get(`http://127.0.0.1:${port}${checkPath}`, (res) => {
           if (res.statusCode >= 200 && res.statusCode < 400) {
             resolve(true);
           } else {
-            reject(new Error(\`Health check failed with status \${res.statusCode}\`));
+            reject(new Error(`Health check failed with status ${res.statusCode}`));
           }
         });
         req.on('error', (e) => reject(e));
@@ -145,9 +145,9 @@ module.exports = {
   },
 
   nginxConfig(app) {
-    return \`
+    return `
 location / {
-    proxy_pass http://127.0.0.1:\${app.config.port};
+    proxy_pass http://127.0.0.1:${app.config.port};
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection 'upgrade';
@@ -155,6 +155,6 @@ location / {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
-\`;
+`;
   }
 };
