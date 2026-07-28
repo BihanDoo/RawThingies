@@ -1,0 +1,44 @@
+# CONTEXT_AI.TXT - Raw Thingies project state
+Last updated: 2026-07-27T17:52:00Z
+
+## 1. WHAT RAW THINGIES IS (one paragraph, unchanging)
+Raw Thingies is a Docker-free, self-hosted deployment platform and control plane that manages raw OS-level processes. It provisions its own infrastructure, manages Node.js and Python apps via PM2, sets up WordPress apps via PHP-FPM, and automates Nginx + Certbot for SSL, all without containers.
+
+## 2. APP TYPES IMPLEMENTED SO FAR
+- node (in progress)
+
+## 3. CURRENT FOCUS
+Working on: Initial provisioning script and `node` app type deployment pipeline.
+Status: Initializing project structure and writing base configuration.
+
+## 4. ARCHITECTURE DECISIONS LOG (ADR-style, append-only, keep terse)
+- [2026-07-27] Created initial `context_ai.txt` as per Section 15.
+- [2026-07-27] Using vanilla `process.argv` parsing for CLI to keep dependencies zero/minimal.
+- [2026-07-27] Defaulting to standard repo versions for Node.js (via NodeSource v20 LTS), MySQL, MongoDB.
+
+## 5. FILE MANIFEST (top-level, not exhaustive)
+/context_ai.txt          - AI context state
+/provisioning/install.sh - Ubuntu provisioning script
+/cli/raw.js              - CLI entry point
+/server/deploy/index.js  - Type-agnostic deploy state machine
+/server/app-types/       - App type plugin modules
+
+## 6. COMPLETED
+- [x] Project initialization
+- [x] Provisioning script
+- [x] CLI entry point
+- [x] Type-agnostic deploy state machine
+- [x] Node.js app type plugin
+
+## 7. IN PROGRESS (exactly what you were doing, exact next step)
+Working on: Testing phase
+Next concrete action: Figure out the best way to test the Linux-specific code on the current environment or external VPS.
+
+## 8. KNOWN ISSUES / TECH DEBT
+- No UI built yet, relying strictly on CLI testing first.
+
+## 9. THINGS TRIED AND REJECTED (don't redo these)
+- Rejected `commander` for CLI args parsing; vanilla `process.argv` is sufficient for current scope.
+
+## 10. ENVIRONMENT / CONFIG NOTES
+- Dev VPS: Standard Ubuntu 22.04/24.04 target.
