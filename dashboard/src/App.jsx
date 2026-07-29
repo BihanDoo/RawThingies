@@ -69,6 +69,7 @@ export default function App() {
   const [envAppName, setEnvAppName] = useState(null);
   const [envText, setEnvText] = useState('');
   const [savingEnv, setSavingEnv] = useState(false);
+  const [webhookInfo, setWebhookInfo] = useState(null);
 
   function handleLogin(newToken) {
     localStorage.setItem(TOKEN_KEY, newToken);
@@ -200,6 +201,22 @@ export default function App() {
     }
   }
 
+  async function handleShowWebhook(name) {
+    if (webhookInfo && webhookInfo.name === name) {
+      setWebhookInfo(null);
+      return;
+    }
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/apps/${encodeURIComponent(name)}/webhook`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to get webhook');
+      setWebhookInfo({ name, ...data });
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   if (!token) {
     return <LoginScreen onLogin={handleLogin} />;
   }
@@ -258,11 +275,28 @@ export default function App() {
                     >
                       Env
                     </button>
+                    <button className="secondary" onClick={() => handleShowWebhook(a.name)}>
+                      Webhook
+                    </button>
                   </td>
                 </tr>
                 {a.status === 'failed' && a.lastError && (
                   <tr key={`${a.name}-error`} className="error-row">
                     <td colSpan={6}>{a.lastError}</td>
+                  </tr>
+                )}
+                {webhookInfo && webhookInfo.name === a.name && (
+                  <tr key={`${a.name}-webhook`} className="env-row">
+                    <td colSpan={6}>
+                      <div className="webhook-info">
+                        <div>Payload URL: <code>http://&lt;your-server&gt;{webhookInfo.url}</code></div>
+                        <div>Content type: <code>application/json</code></div>
+                        <div>Secret: <code>{webhookInfo.secret}</code></div>
+                        <div className="env-editor-hint">
+                          Add this in GitHub under Settings → Webhooks. Pushes to <code>{a.branch}</code> will auto-deploy.
+                        </div>
+                      </div>
+                    </td>
                   </tr>
                 )}
                 {envAppName === a.name && (

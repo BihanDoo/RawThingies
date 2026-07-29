@@ -92,6 +92,19 @@ button.secondary:disabled { border-color: #262a33; color: #55596a; }
 
 .env-editor-hint { font-size: 0.75rem; color: #7a7f8c; }
 
+.webhook-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+.webhook-info code {
+  background: #1a1d24;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
 .error-row td {
   background: #2a1414;
   color: #fca5a5;

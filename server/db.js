@@ -40,6 +40,11 @@ async function getUsersCollection() {
   return database.collection('users');
 }
 
+async function getWebhooksCollection() {
+  const database = await connect();
+  return database.collection('webhooks');
+}
+
 async function close() {
   if (client) {
     await client.close();
@@ -54,5 +59,6 @@ module.exports = {
   getDomainsCollection,
   getDeployLogsCollection,
   getUsersCollection,
+  getWebhooksCollection,
   close
 };

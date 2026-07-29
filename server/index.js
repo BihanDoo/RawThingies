@@ -5,6 +5,19 @@ const appsService = require('./apps-service');
 const auth = require('./auth');
 
 const app = express();
+
+// Registered BEFORE the global express.json() below, and deliberately not
+// under it: this route needs the exact raw bytes GitHub sent for HMAC
+// verification. If express.json() ran first it would consume the body
+// stream and hand this route an already-parsed object instead of a Buffer.
+app.post('/webhooks/github/:name', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    res.json(await appsService.handleGithubPush(req.params.name, req.body, req.headers['x-hub-signature-256']));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.use(express.json());
 
 app.post('/api/auth/login', async (req, res) => {
@@ -93,6 +106,17 @@ app.post('/api/apps/:name/env', async (req, res) => {
       return res.status(400).json({ error: 'Provide at least one key/value in "vars"' });
     }
     res.json(await appsService.setEnvVars(req.params.name, vars));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Returns the existing webhook secret, or creates one on first call.
+// Authenticated (under /api/apps) - this is the one place the secret is
+// ever exposed, so the operator can paste it into GitHub's webhook config.
+app.post('/api/apps/:name/webhook', async (req, res) => {
+  try {
+    res.json(await appsService.getOrCreateWebhook(req.params.name));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

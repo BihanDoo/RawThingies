@@ -3,6 +3,7 @@ const db = require('./db');
 const appTypes = require('./app-types/registry');
 const { deploy, rollbackTo } = require('./deploy');
 const vault = require('./vault');
+const webhooks = require('./webhooks');
 
 // Decrypted only in-memory, right before use - never logged, never returned
 // from an API response. See server/vault.js.
@@ -184,4 +185,67 @@ async function rollbackApp(name, releaseId) {
   }
 }
 
-module.exports = { createApp, listApps, getApp, listReleases, runDeploy, triggerDeploy, rollbackApp, setEnvVars };
+// Creates the webhook secret on first call, returns the same one on every
+// call after (idempotent - the operator can safely re-fetch this to paste
+// into GitHub again without invalidating what's already configured there).
+async function getOrCreateWebhook(name) {
+  const apps = await db.getAppsCollection();
+  const app = await apps.findOne({ name });
+  if (!app) throw new Error(`App ${name} not found`);
+
+  const hooks = await db.getWebhooksCollection();
+  let hook = await hooks.findOne({ appId: app._id, provider: 'github' });
+  if (!hook) {
+    const secret = webhooks.generateSecret();
+    const { insertedId } = await hooks.insertOne({
+      appId: app._id,
+      provider: 'github',
+      secret,
+      lastTriggeredAt: null,
+      createdAt: new Date()
+    });
+    hook = { _id: insertedId, secret };
+  }
+
+  return { url: `/webhooks/github/${name}`, secret: hook.secret };
+}
+
+// Called by the public /webhooks/github/:name route. rawBody must be the
+// exact bytes GitHub sent (see server/webhooks.js) - HMAC verification
+// happens before anything else, including before the payload is trusted
+// enough to even parse.
+async function handleGithubPush(name, rawBody, signatureHeader) {
+  const apps = await db.getAppsCollection();
+  const app = await apps.findOne({ name });
+  if (!app) throw new Error(`App ${name} not found`);
+
+  const hooks = await db.getWebhooksCollection();
+  const hook = await hooks.findOne({ appId: app._id, provider: 'github' });
+  if (!hook) throw new Error(`No webhook configured for ${name}`);
+
+  if (!webhooks.verifySignature(hook.secret, rawBody, signatureHeader)) {
+    throw new Error('Invalid webhook signature');
+  }
+
+  const payload = JSON.parse(rawBody.toString('utf8'));
+  const pushedBranch = payload.ref ? payload.ref.replace('refs/heads/', '') : null;
+  if (pushedBranch && app.branch && pushedBranch !== app.branch) {
+    return { skipped: true, reason: `push was to ${pushedBranch}, ${name} tracks ${app.branch}` };
+  }
+
+  await hooks.updateOne({ _id: hook._id }, { $set: { lastTriggeredAt: new Date() } });
+  return triggerDeploy(name);
+}
+
+module.exports = {
+  createApp,
+  listApps,
+  getApp,
+  listReleases,
+  runDeploy,
+  triggerDeploy,
+  rollbackApp,
+  setEnvVars,
+  getOrCreateWebhook,
+  handleGithubPush
+};

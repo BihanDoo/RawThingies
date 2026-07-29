@@ -16,6 +16,7 @@ async function main() {
     console.log('  logs <name> [--follow]');
     console.log('  admin create --email <email> --password <password>');
     console.log('  env set <name> KEY=value [KEY2=value2 ...]');
+    console.log('  webhooks create <name>');
     process.exit(1);
   }
 
@@ -91,6 +92,20 @@ async function main() {
         console.log(`Set ${Object.keys(varsToMerge).join(', ')} for ${name}. App now has ${result.keys.length} env var(s) total.`);
       } else {
         console.log(`Unknown sub-command for env: ${args[1]}`);
+      }
+    } else if (command === 'webhooks') {
+      if (args[1] === 'create') {
+        const name = args[2];
+        if (!name) throw new Error('Missing app name: raw webhooks create <name>');
+
+        const hook = await appsService.getOrCreateWebhook(name);
+        console.log(`GitHub webhook for ${name}:`);
+        console.log(`  Payload URL: http://<your-server>${hook.url}`);
+        console.log(`  Content type: application/json`);
+        console.log(`  Secret: ${hook.secret}`);
+        console.log(`Configure this in the GitHub repo's Settings -> Webhooks. Pushes to the '${(await appsService.getApp(name)).branch}' branch will auto-deploy.`);
+      } else {
+        console.log(`Unknown sub-command for webhooks: ${args[1]}`);
       }
     } else if (command === 'admin') {
       if (args[1] === 'create') {
