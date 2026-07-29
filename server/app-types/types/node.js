@@ -89,7 +89,18 @@ module.exports = {
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-        pm2.reload(app.name, (err, proc) => {
+        // Plain pm2.reload() does NOT pick up new env vars - PM2 keeps
+        // whatever env the process was originally pm2.start()'d with unless
+        // you explicitly pass updateEnv + a fresh env object here. Without
+        // this, `raw env set` would silently never reach the running app.
+        pm2.restart(app.name, {
+          updateEnv: true,
+          env: {
+            ...ctx.decryptedEnvVars,
+            PORT: app.config.port,
+            NODE_ENV: 'production'
+          }
+        }, (err, proc) => {
           pm2.disconnect();
           if (err) return reject(err);
           resolve(proc);
