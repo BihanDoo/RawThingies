@@ -4,6 +4,45 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
+function buildEnv(app, ctx) {
+  return {
+    ...ctx.decryptedEnvVars,
+    PORT: app.config.port,
+    NODE_ENV: 'production'
+  };
+}
+
+function startProcess(app, releasePath, ctx) {
+  return new Promise((resolve, reject) => {
+    const sharedPath = path.join('/var/www/apps', app.name, 'shared');
+    const startCommand = app.config.startCommand || 'npm start';
+
+    const logsDir = path.join(sharedPath, 'logs');
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+
+    pm2.start({
+      name: app.name,
+      script: startCommand,
+      cwd: releasePath,
+      // 'cluster' mode requires a real Node entry file it can require()
+      // internally - it can't cluster an arbitrary npm/yarn wrapper command.
+      // 'fork' works with any start command and is what config.startCommand
+      // (default 'npm start') actually needs.
+      exec_mode: 'fork',
+      instances: 1,
+      env: buildEnv(app, ctx),
+      max_memory_restart: '512M',
+      out_file: path.join(logsDir, 'out.log'),
+      error_file: path.join(logsDir, 'error.log'),
+    }, (err, proc) => {
+      if (err) return reject(err);
+      resolve(proc);
+    });
+  });
+}
+
 module.exports = {
   id: 'node',
 
@@ -48,62 +87,33 @@ module.exports = {
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-
-        const sharedPath = path.join('/var/www/apps', app.name, 'shared');
-        const startCommand = app.config.startCommand || 'npm start';
-
-        // Ensure logs directory exists
-        const logsDir = path.join(sharedPath, 'logs');
-        if (!fs.existsSync(logsDir)) {
-          fs.mkdirSync(logsDir, { recursive: true });
-        }
-
-        pm2.start({
-          name: app.name,
-          script: startCommand,
-          cwd: releasePath,
-          // 'cluster' mode requires a real Node entry file it can require()
-          // internally - it can't cluster an arbitrary npm/yarn wrapper command.
-          // 'fork' works with any start command and is what config.startCommand
-          // (default 'npm start') actually needs.
-          exec_mode: 'fork',
-          instances: 1,
-          env: {
-            ...ctx.decryptedEnvVars,
-            PORT: app.config.port,
-            NODE_ENV: 'production'
-          },
-          max_memory_restart: '512M',
-          out_file: path.join(logsDir, 'out.log'),
-          error_file: path.join(logsDir, 'error.log'),
-        }, (err, proc) => {
-          pm2.disconnect();
-          if (err) return reject(err);
-          resolve(proc);
-        });
+        startProcess(app, releasePath, ctx)
+          .then((proc) => { pm2.disconnect(); resolve(proc); })
+          .catch((err) => { pm2.disconnect(); reject(err); });
       });
     });
   },
 
+  // PM2's reload()/restart() do NOT pick up new env vars by default - PM2
+  // keeps whatever env the process was originally pm2.start()'d with, and
+  // passing a fresh `env` object to restart() requires an ecosystem.config
+  // file (throws "Using --env [env] without passing the ecosystem.config.js
+  // does not work" otherwise - confirmed by actually hitting it). So instead
+  // of fighting PM2's updateEnv semantics, just delete + start fresh with
+  // the current env - simple, predictable, and reuses the exact same path
+  // that already works for first deploys. `current` already points at the
+  // new release by the time this is called (deploy/index.js flips the
+  // symlink before calling start/reload).
   async reload(app, ctx) {
+    const currentPath = path.join('/var/www/apps', app.name, 'current');
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-        // Plain pm2.reload() does NOT pick up new env vars - PM2 keeps
-        // whatever env the process was originally pm2.start()'d with unless
-        // you explicitly pass updateEnv + a fresh env object here. Without
-        // this, `raw env set` would silently never reach the running app.
-        pm2.restart(app.name, {
-          updateEnv: true,
-          env: {
-            ...ctx.decryptedEnvVars,
-            PORT: app.config.port,
-            NODE_ENV: 'production'
-          }
-        }, (err, proc) => {
-          pm2.disconnect();
-          if (err) return reject(err);
-          resolve(proc);
+        pm2.delete(app.name, () => {
+          // Ignore delete errors (e.g. process didn't exist) - proceed regardless.
+          startProcess(app, currentPath, ctx)
+            .then((proc) => { pm2.disconnect(); resolve(proc); })
+            .catch((err) => { pm2.disconnect(); reject(err); });
         });
       });
     });
