@@ -1,0 +1,82 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: #0f1115;
+  color: #e6e6e6;
+}
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+h1 { margin-bottom: 0.25rem; }
+h2 { font-size: 1.1rem; color: #b7b7b7; margin-top: 2.5rem; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #262a33;
+  font-size: 0.9rem;
+}
+
+th { color: #9a9a9a; font-weight: 600; }
+
+button {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+button:disabled { background: #3b4252; cursor: not-allowed; }
+
+.status {
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  background: #262a33;
+}
+
+.status-running { background: #14532d; color: #86efac; }
+.status-deploying { background: #713f12; color: #fde68a; }
+.status-failed { background: #7f1d1d; color: #fca5a5; }
+.status-created { background: #1e3a5f; color: #93c5fd; }
+
+form {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+input, select {
+  background: #1a1d24;
+  border: 1px solid #2e3340;
+  color: #e6e6e6;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.error {
+  background: #7f1d1d;
+  color: #fca5a5;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}

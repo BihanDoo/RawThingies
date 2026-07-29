@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const db = require('../server/db');
 const { deploy } = require('../server/deploy');
-const appTypes = require('../server/app-types/registry');
+const appsService = require('../server/apps-service');
 const { spawnSync } = require('child_process');
 
 async function main() {
@@ -26,40 +26,20 @@ async function main() {
           throw new Error('Missing required arguments: --name, --type, --domain');
         }
 
-        const plugin = appTypes[parsed.type];
-        if (!plugin) throw new Error(`Unknown app type: ${parsed.type}`);
-
-        const apps = await db.getAppsCollection();
-        const existing = await apps.findOne({ name: parsed.name });
-        if (existing) {
-          throw new Error(`App ${parsed.name} already exists`);
-        }
-
-        const newApp = {
+        const newApp = await appsService.createApp({
           name: parsed.name,
           type: parsed.type,
-          repoUrl: parsed.repo || null,
-          branch: parsed.branch || 'main',
-          domain: parsed.domain,
-          config: {},
-          createdAt: new Date(),
-          updatedAt: new Date()
-        };
-
-        // One-time provisioning (e.g. port allocation) happens now, not on every deploy.
-        if (plugin.provision) {
-          await plugin.provision(newApp, {});
-        }
-
-        await apps.insertOne(newApp);
+          repo: parsed.repo,
+          branch: parsed.branch,
+          domain: parsed.domain
+        });
         console.log(`App ${newApp.name} created successfully.`);
       } else if (args[1] === 'list') {
-        const apps = await db.getAppsCollection();
-        const list = await apps.find().toArray();
+        const list = await appsService.listApps();
         if (list.length === 0) {
           console.log('No apps found.');
         } else {
-          console.table(list.map(a => ({ Name: a.name, Type: a.type, Domain: a.domain })));
+          console.table(list.map(a => ({ Name: a.name, Type: a.type, Domain: a.domain, Status: a.status })));
         }
       } else {
         console.log(`Unknown sub-command for apps: ${args[1]}`);
