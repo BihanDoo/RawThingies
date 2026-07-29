@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const db = require('../server/db');
 const appsService = require('../server/apps-service');
+const auth = require('../server/auth');
 const { spawnSync } = require('child_process');
 
 async function main() {
@@ -13,6 +14,7 @@ async function main() {
     console.log('  deploy <name>');
     console.log('  rollback <name> [--release <id>]');
     console.log('  logs <name> [--follow]');
+    console.log('  admin create --email <email> --password <password>');
     process.exit(1);
   }
 
@@ -70,6 +72,23 @@ async function main() {
       }
 
       spawnSync('pm2', pm2Args, { stdio: 'inherit' });
+    } else if (command === 'admin') {
+      if (args[1] === 'create') {
+        const parsed = parseArgs(args.slice(2));
+        if (!parsed.email || !parsed.password) {
+          throw new Error('Missing required arguments: --email, --password');
+        }
+
+        const users = await db.getUsersCollection();
+        const existing = await users.findOne({ email: parsed.email });
+        if (existing) throw new Error(`User ${parsed.email} already exists`);
+
+        const passwordHash = await auth.hashPassword(parsed.password);
+        await users.insertOne({ email: parsed.email, passwordHash, role: 'admin', createdAt: new Date() });
+        console.log(`Admin user ${parsed.email} created.`);
+      } else {
+        console.log(`Unknown sub-command for admin: ${args[1]}`);
+      }
     } else {
       console.log(`Unknown command: ${command}`);
     }

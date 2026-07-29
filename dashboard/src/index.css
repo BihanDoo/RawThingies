@@ -16,6 +16,24 @@ body {
 h1 { margin-bottom: 0.25rem; }
 h2 { font-size: 1.1rem; color: #b7b7b7; margin-top: 2.5rem; }
 
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.login-page {
+  max-width: 320px;
+  margin-top: 15vh;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 1.5rem;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

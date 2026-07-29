@@ -2,41 +2,119 @@ import { useCallback, useEffect, useState } from 'react';
 
 const APP_TYPES = ['node'];
 const POLL_INTERVAL_MS = 3000;
+const TOKEN_KEY = 'raw_thingies_token';
 
 function StatusBadge({ status }) {
   return <span className={`status status-${status || 'unknown'}`}>{status || 'unknown'}</span>;
 }
 
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Login failed');
+      onLogin(data.token);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="page login-page">
+      <h1>Raw Thingies</h1>
+      <form onSubmit={handleSubmit} className="login-form">
+        <input
+          type="email"
+          placeholder="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+        <input
+          type="password"
+          placeholder="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+        <button type="submit" disabled={submitting}>{submitting ? 'Signing in…' : 'Sign in'}</button>
+        {error && <div className="error">{error}</div>}
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
+  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
   const [apps, setApps] = useState([]);
   const [error, setError] = useState(null);
   const [form, setForm] = useState({ name: '', type: 'node', repo: '', branch: 'main', domain: '' });
   const [creating, setCreating] = useState(false);
   const [deployingName, setDeployingName] = useState(null);
 
+  function handleLogin(newToken) {
+    localStorage.setItem(TOKEN_KEY, newToken);
+    setToken(newToken);
+  }
+
+  function handleLogout() {
+    localStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+  }
+
+  // Wraps fetch with the auth header and bounces back to the login screen
+  // on a 401 (expired/invalid token) instead of surfacing a confusing error.
+  const apiFetch = useCallback(async (url, opts = {}) => {
+    const res = await fetch(url, {
+      ...opts,
+      headers: { ...(opts.headers || {}), Authorization: `Bearer ${token}` }
+    });
+    if (res.status === 401) {
+      handleLogout();
+      throw new Error('Session expired, please sign in again');
+    }
+    return res;
+  }, [token]);
+
   const loadApps = useCallback(async () => {
     try {
-      const res = await fetch('/api/apps');
+      const res = await apiFetch('/api/apps');
       if (!res.ok) throw new Error(`Failed to load apps (${res.status})`);
       setApps(await res.json());
       setError(null);
     } catch (err) {
       setError(err.message);
     }
-  }, []);
+  }, [apiFetch]);
 
   useEffect(() => {
+    if (!token) return;
     loadApps();
     const interval = setInterval(loadApps, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [loadApps]);
+  }, [token, loadApps]);
 
   async function handleCreate(e) {
     e.preventDefault();
     setCreating(true);
     setError(null);
     try {
-      const res = await fetch('/api/apps', {
+      const res = await apiFetch('/api/apps', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
@@ -56,7 +134,7 @@ export default function App() {
     setDeployingName(name);
     setError(null);
     try {
-      const res = await fetch(`/api/apps/${encodeURIComponent(name)}/deploy`, { method: 'POST' });
+      const res = await apiFetch(`/api/apps/${encodeURIComponent(name)}/deploy`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to start deploy');
       await loadApps();
@@ -72,7 +150,7 @@ export default function App() {
     setDeployingName(name);
     setError(null);
     try {
-      const res = await fetch(`/api/apps/${encodeURIComponent(name)}/rollback`, { method: 'POST' });
+      const res = await apiFetch(`/api/apps/${encodeURIComponent(name)}/rollback`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to roll back');
       await loadApps();
@@ -83,9 +161,16 @@ export default function App() {
     }
   }
 
+  if (!token) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   return (
     <div className="page">
-      <h1>Raw Thingies</h1>
+      <div className="header-row">
+        <h1>Raw Thingies</h1>
+        <button className="secondary" onClick={handleLogout}>Sign out</button>
+      </div>
       {error && <div className="error">{error}</div>}
 
       <section>

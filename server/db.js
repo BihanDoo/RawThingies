@@ -35,6 +35,11 @@ async function getDeployLogsCollection() {
   return database.collection('deploy_logs');
 }
 
+async function getUsersCollection() {
+  const database = await connect();
+  return database.collection('users');
+}
+
 async function close() {
   if (client) {
     await client.close();
@@ -48,5 +53,6 @@ module.exports = {
   getReleasesCollection,
   getDomainsCollection,
   getDeployLogsCollection,
+  getUsersCollection,
   close
 };

@@ -2,9 +2,34 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const appsService = require('./apps-service');
+const auth = require('./auth');
 
 const app = express();
 app.use(express.json());
+
+app.post('/api/auth/login', async (req, res) => {
+  const ip = req.ip;
+  if (auth.isRateLimited(ip)) {
+    return res.status(429).json({ error: 'Too many failed login attempts, try again later' });
+  }
+
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Missing email or password' });
+  }
+
+  try {
+    const token = await auth.login(email, password);
+    auth.clearAttempts(ip);
+    res.json({ token });
+  } catch (err) {
+    auth.recordFailedAttempt(ip);
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// Everything under /api/apps requires a valid session.
+app.use('/api/apps', auth.requireAuth);
 
 app.get('/api/apps', async (req, res) => {
   try {
