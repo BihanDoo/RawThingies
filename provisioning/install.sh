@@ -90,9 +90,14 @@ else
     echo "Master key already exists."
 fi
 
-# Ensure base apps directory exists
+# Ensure base apps directory exists, owned by whoever runs the Raw Thingies
+# control plane (the sudo caller) so the deploy pipeline can write releases
+# into it without running as root.
 mkdir -p /var/www/apps
 chmod 755 /var/www/apps
+if [ -n "$SUDO_USER" ]; then
+    chown -R "$SUDO_USER:$SUDO_USER" /var/www/apps
+fi
 
 echo "=========================================="
 echo " Provisioning complete."
