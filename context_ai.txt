@@ -1,31 +1,37 @@
 # CONTEXT_AI.TXT - Raw Thingies project state
-Last updated: 2026-07-29T06:20:00Z
+Last updated: 2026-07-29T12:05:00Z
 
 ## 1. WHAT RAW THINGIES IS (one paragraph, unchanging)
 Raw Thingies is a Docker-free, self-hosted deployment platform and control plane that manages raw OS-level processes. It provisions its own infrastructure, manages Node.js and Python apps via PM2, sets up WordPress apps via PHP-FPM, and automates Nginx + Certbot for SSL, all without containers.
 
 ## 2. APP TYPES IMPLEMENTED SO FAR
-- node (deploy pipeline written, not yet proven on a real server)
+- node (DONE and PROVEN - full pipeline verified end-to-end on a real Ubuntu VM: git clone -> npm install -> PM2 start -> health check -> Nginx config -> nginx -t -> systemctl reload nginx -> live traffic served through Nginx)
 
 ## 3. CURRENT FOCUS
-Working on: Minimal dashboard (Express API + React panel) so apps can be viewed/created/deployed from another device on the LAN.
-Status: API + dashboard scaffolded and smoke-tested locally (Windows dev machine, Express layer only - no filesystem/PM2/Nginx side effects exercised). Not yet run on a real Ubuntu box. Node deploy pipeline itself (git clone -> pm2 -> nginx) is still UNPROVEN end-to-end - the operator explicitly chose to build the dashboard before finishing that validation.
+Working on: Just finished the first real proof of the node deploy pipeline + minimal dashboard, both on a real Ubuntu test VM on the operator's LAN.
+Status: Working end-to-end. A test app (hello-node) was created via the API and deployed for real - confirmed serving live traffic through Nginx with a proxied domain. Dashboard reachable from other LAN devices at http://192.168.0.105:4000. Next real milestone is operator's choice: harden this (auth, Nginx-proxy the dashboard itself), or add a second app type (python/wordpress) per the brief's original build order.
 
 ## 4. ARCHITECTURE DECISIONS LOG (ADR-style, append-only, keep terse)
 - [2026-07-27] Created initial `context_ai.txt` as per Section 15.
 - [2026-07-27] Using vanilla `process.argv` parsing for CLI to keep dependencies zero/minimal.
 - [2026-07-27] Defaulting to standard repo versions for Node.js (via NodeSource v20 LTS), MySQL, MongoDB.
 - [2026-07-28] Found and fixed: 4 core files (cli/raw.js, server/deploy/index.js, server/deploy/nginx.js, server/app-types/types/node.js) contained literal escaped backtick/dollar characters instead of real template literals - hard syntax errors, would not run at all. Rewrote clean.
-- [2026-07-28] Found and fixed: `appType.provision()` was defined on the node plugin but never called anywhere, so `app.config.port` was always undefined. Now called once in `apps create` (both CLI and API path, via shared `server/apps-service.js`), matching brief Section 4.1 ("called once when app is first created, not on every deploy").
-- [2026-07-29] Chose Express over Fastify for the control-plane API (brief Section 2 left this open) - no strong reason to deviate from the brief's own default example.
-- [2026-07-29] Extracted `server/apps-service.js` (createApp/listApps/getApp/triggerDeploy) as the single source of truth used by both `cli/raw.js` and `server/index.js`, so the dashboard is a thin layer over the same logic the CLI uses, not a parallel implementation (brief Section 1.10).
-- [2026-07-29] Dashboard v1 is intentionally minimal per operator's explicit choice: no auth yet (LAN-only, single operator), no live log streaming, no rollback UI, no env var editor. Just app list + status + one-click deploy + create form. Auth must be added before this is ever exposed beyond a trusted LAN.
-- [2026-07-29] `triggerDeploy()` in apps-service.js fires `deploy()` in the background and returns immediately, writing `status`/`lastDeployedAt`/`lastError` back onto the app document; the dashboard polls every 3s rather than using WebSockets, to keep v1 dependency-light. Revisit with `pm2.launchBus()`/WS log streaming when doing the full Section 12 scope.
-- [2026-07-29] Express serves the built dashboard (`dashboard/dist`) as static files directly on the same port as the API (:4000) - avoids CORS and avoids needing a separate Nginx vhost for the platform's own UI in v1. NOT yet proxied through Nginx on port 80/443, so reaching it from another LAN device currently requires opening port 4000 in UFW (`sudo ufw allow 4000/tcp`) - this deviates from the brief's Section 10 security model (UFW should only need 22/80/443) and should be fixed by adding a real Nginx vhost for raw-thingies-api once the platform is closer to production use.
+- [2026-07-28] Found and fixed: `appType.provision()` was defined on the node plugin but never called anywhere, so `app.config.port` was always undefined. Now called once in `apps create` (both CLI and API path, via shared `server/apps-service.js`), matching brief Section 4.1.
+- [2026-07-29] Chose Express over Fastify for the control-plane API (brief Section 2 left this open).
+- [2026-07-29] Extracted `server/apps-service.js` (createApp/listApps/getApp/triggerDeploy) as the single source of truth used by both `cli/raw.js` and `server/index.js`.
+- [2026-07-29] Dashboard v1 is intentionally minimal per operator's explicit choice: no auth yet (LAN-only, single operator), no live log streaming, no rollback UI, no env var editor. `triggerDeploy()` fires `deploy()` in the background and writes `status`/`lastDeployedAt`/`lastError` back onto the app doc; dashboard polls every 3s instead of WebSockets.
+- [2026-07-29] Express serves the built dashboard (`dashboard/dist`) as static files directly on :4000 - avoids CORS, avoids a separate Nginx vhost for the platform's own UI in v1. Reaching it from another LAN device requires port 4000 open (see below) - this deviates from brief Section 10's "only 22/80/443" model, on purpose, as a v1 shortcut.
+- [2026-07-29] PROVED the full pipeline on a real Ubuntu 26.04 VM (raw@192.168.0.105, LAN test box). Found and fixed 4 more real bugs in the process, in order encountered:
+  1. Root `node_modules` on the VM predated the `express` dependency - just needed `npm install` re-run after pulling. Not a code bug, a stale-install trap.
+  2. Rollback logic in `deploy()` called `fs.readdirSync(releasesPath)` unconditionally in the catch block; if deploy failed before that directory was ever created (e.g. a permission error), this threw a NEW unhandled error that masked the real one. Fixed: guard with `fs.existsSync(releasesPath)` first.
+  3. `/var/www/apps` was created by `install.sh` as root:root 755, but the control-plane process correctly runs as an unprivileged user (not root) - so it couldn't write releases into it. Fixed: `install.sh` now chowns `/var/www/apps` to `$SUDO_USER` (the operator who ran the script via sudo).
+  4. `node` app-type's `start()` used PM2 `exec_mode: 'cluster'` with `script: 'npm start'`. Cluster mode requires a real requireable Node entry file - it silently fails (process shows as errored, but BOTH stdout and stderr log files stay empty) when given an npm/yarn wrapper command. Fixed: switched to `exec_mode: 'fork'`, `instances: 1`. Cluster mode may be worth revisiting later, but only once app-type config has a proper "entry file" concept separate from "start command" - forcing cluster mode onto arbitrary start commands doesn't work.
+  5. Writing `/etc/nginx/sites-available/*` and running `systemctl reload nginx` both need root, but (correctly) the control plane doesn't run as root. Fixed properly, not hacked around: `install.sh` now chowns just `sites-available`/`sites-enabled` to the operator, and installs a narrowly-scoped `/etc/sudoers.d/raw-thingies` rule - NOPASSWD for exactly `/usr/sbin/nginx -t` and `/usr/bin/systemctl reload nginx`, nothing else, validated with `visudo -c` before install so a bad rule can't break sudo. `deploy/index.js` now calls `sudo nginx -t` / `sudo systemctl reload nginx`. The operator applied the sudoers/chown step manually via SSH (Claude Code's safety classifier correctly blocks automated sudoers.d writes over a remote SSH session - this is the right call, don't try to route around it again; hand the operator the exact commands instead).
+- [2026-07-29] Test app used for the proof: `~/test-apps/hello-node` on the VM itself (plain git repo, not on GitHub) - a minimal `http` server with `/health`. Deployed as app name `hello-node`, domain `hello-node.local` (fake, LAN-only, no real DNS - verified via `curl -H "Host: hello-node.local"` instead).
 
 ## 5. FILE MANIFEST (top-level, not exhaustive)
 /context_ai.txt              - AI context state
-/provisioning/install.sh     - Ubuntu provisioning script
+/provisioning/install.sh     - Ubuntu provisioning script (now also grants scoped nginx sudo)
 /cli/raw.js                  - CLI entry point (uses server/apps-service.js)
 /server/index.js             - Express API entry point + serves built dashboard
 /server/apps-service.js      - shared create/list/get/deploy logic (CLI + API both call this)
@@ -37,35 +43,39 @@ Status: API + dashboard scaffolded and smoke-tested locally (Windows dev machine
 
 ## 6. COMPLETED
 - [x] Project initialization
-- [x] Provisioning script
+- [x] Provisioning script (now also sets up /var/www/apps ownership + scoped nginx sudo)
 - [x] CLI entry point
 - [x] Type-agnostic deploy state machine
 - [x] Node.js app type plugin
-- [x] Fixed syntax corruption + provision() wiring bug in core files
 - [x] Express API (server/index.js) - apps list/create/get/deploy endpoints
 - [x] Minimal React dashboard (app list, status polling, create form, deploy button)
-- [x] Local smoke test on Windows: server boots, serves dashboard, creates/lists/rejects-duplicate apps against a real MongoDB. (Deploy/PM2/Nginx code paths NOT exercised - Windows can't run them.)
+- [x] FULL END-TO-END PROOF on a real Ubuntu VM: created hello-node via the API, deployed it, confirmed it's live and reachable through Nginx with correct proxying. PM2 stable (0 crash restarts post-fix), Mongo status tracking works, Nginx config generation works.
 
 ## 7. IN PROGRESS (exactly what you were doing, exact next step)
-Working on: Getting this onto a real Ubuntu server on the operator's LAN.
-Next concrete action: On the Ubuntu box - `git clone`/`scp` the repo, `sudo ./provisioning/install.sh`, `npm install` (root and /dashboard), `npm run build` in /dashboard, `npm start` (or `pm2 start server/index.js --name raw-thingies-api`) in root, then create + deploy a real test node app through the dashboard and verify PM2 + Nginx + the full pipeline actually works end to end. This is the first real proof of the node deploy pipeline - it has not been proven anywhere yet.
+Working on: nothing blocking right now - the core node pipeline + dashboard are proven. Operator hasn't yet said what's next.
+Next concrete action: ask the operator whether to (a) harden what exists (auth on the dashboard, proxy the dashboard through Nginx on 80/443 instead of exposing :4000, deploy lock, pre-flight health check before cutover per brief Section 6.2), or (b) move on to a second app type (python is the brief's suggested next step, reuses most of the PM2 machinery already proven).
 
 ## 8. KNOWN ISSUES / TECH DEBT
-- Node deploy pipeline (server/deploy/index.js) has never been run successfully end-to-end on real Linux. Untested: git clone step, symlink swap, PM2 start/reload, Nginx config write + reload, health check, rollback path.
 - Health check happens AFTER PM2 cutover/reload, not before (brief Section 6.2 step 6 calls for a pre-flight check on a scratch port before cutover). A bad release currently goes live briefly before rollback triggers.
 - First-deploy failure has no rollback target (no previous release exists yet) - app is left partially started with a symlink pointing at a broken release.
 - Dashboard v1 has no auth - must not be exposed outside a trusted LAN as-is.
-- Dashboard is reached on port 4000 directly, not proxied through Nginx on 80/443 - requires opening 4000 in UFW, which the brief's security model didn't originally intend to expose.
+- Dashboard is reached on port 4000 directly, not proxied through Nginx on 80/443 - requires opening 4000 in UFW (done, scoped to the LAN /24 subnet on the test VM). Should eventually get a real Nginx vhost like any other reverse-proxied service, per brief Section 3's architecture diagram.
 - No deploy lock (concurrent `raw deploy` / dashboard-deploy-button clicks on the same app could race).
-- PM2 `node` plugin uses `exec_mode: 'cluster'` with `script: 'npm start'` - PM2 cluster mode expects a Node entry file, not an npm wrapper; this combination is a known PM2 pain point and hasn't been verified to actually work.
+- `deploy()`'s `isFirstDeploy` check is `!fs.existsSync(currentPath)` - it infers "is there already a running process" from a symlink's existence, not from asking PM2 directly. If the `current` symlink exists but the PM2 process was deleted/crashed outside the normal flow (e.g. manual `pm2 delete`, or a reboot without `pm2 resurrect`), deploy() calls `plugin.reload()` on a process PM2 has no record of and fails with "process or namespace not found". Hit this exact case during testing (self-inflicted via manual pm2 delete) - not yet fixed properly, worth doing before this is trusted unattended.
 - No UI/CLI validation yet that a `--repo` path/URL is actually reachable before attempting deploy.
+- MongoDB apt repo in install.sh is hardcoded to `jammy` (22.04) regardless of actual host codename - worked fine on the Ubuntu 26.04 test VM (MongoDB's repo commonly lags newest Ubuntu releases, jammy packages install fine on newer hosts), but hasn't been stress-tested beyond that.
 
 ## 9. THINGS TRIED AND REJECTED (don't redo these)
 - Rejected `commander` for CLI args parsing; vanilla `process.argv` is sufficient for current scope.
-- Rejected WebSocket log streaming for dashboard v1 (brief's eventual intent per Section 9/12) in favor of simple polling, to keep v1 dependency-light and ship faster. Revisit for full Section 12 scope.
-- Rejected building a full Nginx vhost for the dashboard itself in v1 (adds complexity); serving it directly off Express on :4000 instead. Revisit once ready to harden.
+- Rejected WebSocket log streaming for dashboard v1 in favor of simple polling, to keep v1 dependency-light. Revisit for full Section 12 scope.
+- Rejected building a full Nginx vhost for the dashboard itself in v1; serving it directly off Express on :4000 instead. Revisit once ready to harden.
+- Rejected running the whole raw-thingies-api process as root to sidestep the /var/www/apps and /etc/nginx permission issues. Instead: chown the specific directories the control plane needs to write, plus a narrowly-scoped sudoers rule for the two commands (nginx -t, systemctl reload nginx) that genuinely need root. Keeps blast radius small if the control plane is ever compromised.
+- Rejected sshpass/expect/plink for scripting password-based SSH from the Windows dev machine (none installed, and installing a password-piping tool felt like the wrong default). Used Python + paramiko instead (pure-Python SSH client, supports password auth natively without a pty). This was for AUTOMATING the VM during development/testing only - not part of the shipped product.
+- Rejected an SSH keypair for the test VM per operator's explicit instruction ("don't create any keys, just use password... this is not going out of my firewall"). Password auth only, for this LAN-only test box.
 
 ## 10. ENVIRONMENT / CONFIG NOTES
-- Dev VPS: Standard Ubuntu 22.04/24.04 target. Operator is testing on a real Ubuntu server on their local network (not a VPS yet, not WSL).
-- Mongo running locally on Windows dev machine too (used for local smoke testing of the Express/dashboard layer only).
-- Express API/dashboard binds 0.0.0.0:4000.
+- Test VM: raw@192.168.0.105, Ubuntu 26.04 LTS, LAN subnet 192.168.0.0/24. Repo cloned from https://github.com/BihanDoo/RawThingies.git (operator's own remote - operator commits/pushes directly via their own editor in parallel with this session; always `git pull` on the VM to sync rather than pushing files there directly out-of-band).
+- raw-thingies-api runs under PM2 as user `raw` (NOT root) on the VM, `pm2 save`d so it survives reboots (assuming `pm2 startup` was run by install.sh, which it is).
+- Dashboard/API reachable at http://192.168.0.105:4000 from other devices on that LAN.
+- UFW on the test VM: 22/80/443 open to anywhere, 4000 open to 192.168.0.0/24 only.
+- Operator's dev machine is Windows; local MongoDB also happens to be running there (used only for local smoke-testing the Express/dashboard layer before deploying - the Windows machine can never run the actual deploy pipeline, which is Linux-only by design).
