@@ -105,6 +105,12 @@ if [ ! -f /etc/raw-thingies/master.key ]; then
 else
     echo "Master key already exists."
 fi
+# Owned by the operator (not root) so the control-plane process - which
+# correctly does NOT run as root - can actually read it (used for both the
+# env var vault and JWT signing). Mode stays 600: owner-only.
+if [ -n "$SUDO_USER" ]; then
+    chown "$SUDO_USER":"$SUDO_USER" /etc/raw-thingies/master.key
+fi
 
 # Ensure base apps directory exists, owned by whoever runs the Raw Thingies
 # control plane (the sudo caller) so the deploy pipeline can write releases
