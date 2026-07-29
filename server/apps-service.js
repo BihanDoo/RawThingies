@@ -2,6 +2,24 @@ const { ObjectId } = require('mongodb');
 const db = require('./db');
 const appTypes = require('./app-types/registry');
 const { deploy, rollbackTo } = require('./deploy');
+const vault = require('./vault');
+
+// Decrypted only in-memory, right before use - never logged, never returned
+// from an API response. See server/vault.js.
+function resolveEnvVars(app) {
+  return app.envVars && app.envVars.encryptedBlob ? vault.decryptEnvVars(app.envVars.encryptedBlob) : {};
+}
+
+async function setEnvVars(name, varsToMerge) {
+  const apps = await db.getAppsCollection();
+  const app = await apps.findOne({ name });
+  if (!app) throw new Error(`App ${name} not found`);
+
+  const merged = { ...resolveEnvVars(app), ...varsToMerge };
+  const encryptedBlob = vault.encryptEnvVars(merged);
+  await apps.updateOne({ name }, { $set: { envVars: { encryptedBlob }, updatedAt: new Date() } });
+  return { keys: Object.keys(merged) };
+}
 
 async function createApp({ name, type, repo, branch, domain }) {
   if (!name || !type || !domain) {
@@ -88,7 +106,7 @@ async function runDeploy(app) {
   };
 
   try {
-    const result = await deploy(app, { decryptedEnvVars: {}, releaseTimestamp: timestamp, onLog });
+    const result = await deploy(app, { decryptedEnvVars: resolveEnvVars(app), releaseTimestamp: timestamp, onLog });
     await releases.updateOne({ _id: releaseId }, {
       $set: { status: 'success', commitSha: result.commitSha || null }
     });
@@ -153,7 +171,7 @@ async function rollbackApp(name, releaseId) {
   await apps.updateOne({ name }, { $set: { status: 'deploying', updatedAt: new Date() } });
 
   try {
-    await rollbackTo(app, target.releasePath, { decryptedEnvVars: {} });
+    await rollbackTo(app, target.releasePath, { decryptedEnvVars: resolveEnvVars(app) });
     await apps.updateOne({ name }, {
       $set: { status: 'running', lastDeployedAt: new Date(), lastError: null, updatedAt: new Date() }
     });
@@ -166,4 +184,4 @@ async function rollbackApp(name, releaseId) {
   }
 }
 
-module.exports = { createApp, listApps, getApp, listReleases, runDeploy, triggerDeploy, rollbackApp };
+module.exports = { createApp, listApps, getApp, listReleases, runDeploy, triggerDeploy, rollbackApp, setEnvVars };

@@ -70,6 +70,28 @@ button.secondary {
 }
 button.secondary:disabled { border-color: #262a33; color: #55596a; }
 
+.env-row td { background: #16181f; padding: 0.75rem 0.6rem; }
+
+.env-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 420px;
+}
+
+.env-editor textarea {
+  background: #1a1d24;
+  border: 1px solid #2e3340;
+  color: #e6e6e6;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-family: ui-monospace, Consolas, monospace;
+  resize: vertical;
+}
+
+.env-editor-hint { font-size: 0.75rem; color: #7a7f8c; }
+
 .error-row td {
   background: #2a1414;
   color: #fca5a5;

@@ -15,6 +15,7 @@ async function main() {
     console.log('  rollback <name> [--release <id>]');
     console.log('  logs <name> [--follow]');
     console.log('  admin create --email <email> --password <password>');
+    console.log('  env set <name> KEY=value [KEY2=value2 ...]');
     process.exit(1);
   }
 
@@ -72,6 +73,25 @@ async function main() {
       }
 
       spawnSync('pm2', pm2Args, { stdio: 'inherit' });
+    } else if (command === 'env') {
+      if (args[1] === 'set') {
+        const name = args[2];
+        if (!name) throw new Error('Missing app name: raw env set <name> KEY=value ...');
+        const pairs = args.slice(3);
+        if (pairs.length === 0) throw new Error('Provide at least one KEY=value pair');
+
+        const varsToMerge = {};
+        for (const pair of pairs) {
+          const eq = pair.indexOf('=');
+          if (eq === -1) throw new Error(`Invalid KEY=value pair: ${pair}`);
+          varsToMerge[pair.slice(0, eq)] = pair.slice(eq + 1);
+        }
+
+        const result = await appsService.setEnvVars(name, varsToMerge);
+        console.log(`Set ${Object.keys(varsToMerge).join(', ')} for ${name}. App now has ${result.keys.length} env var(s) total.`);
+      } else {
+        console.log(`Unknown sub-command for env: ${args[1]}`);
+      }
     } else if (command === 'admin') {
       if (args[1] === 'create') {
         const parsed = parseArgs(args.slice(2));

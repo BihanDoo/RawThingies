@@ -84,6 +84,20 @@ app.post('/api/apps/:name/rollback', async (req, res) => {
   }
 });
 
+// Write-only by design - values are never returned once set (brief Section
+// 10: never log/expose decrypted values). Operator re-sets if they forget.
+app.post('/api/apps/:name/env', async (req, res) => {
+  try {
+    const vars = (req.body && req.body.vars) || {};
+    if (Object.keys(vars).length === 0) {
+      return res.status(400).json({ error: 'Provide at least one key/value in "vars"' });
+    }
+    res.json(await appsService.setEnvVars(req.params.name, vars));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Serve the built dashboard (dashboard/dist) if it's been built.
 const distPath = path.join(__dirname, '..', 'dashboard', 'dist');
 if (fs.existsSync(distPath)) {

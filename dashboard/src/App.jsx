@@ -66,6 +66,9 @@ export default function App() {
   const [form, setForm] = useState({ name: '', type: 'node', repo: '', branch: 'main', domain: '' });
   const [creating, setCreating] = useState(false);
   const [deployingName, setDeployingName] = useState(null);
+  const [envAppName, setEnvAppName] = useState(null);
+  const [envText, setEnvText] = useState('');
+  const [savingEnv, setSavingEnv] = useState(false);
 
   function handleLogin(newToken) {
     localStorage.setItem(TOKEN_KEY, newToken);
@@ -161,6 +164,42 @@ export default function App() {
     }
   }
 
+  async function handleSaveEnv(name) {
+    const vars = {};
+    for (const line of envText.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq === -1) {
+        setError(`Invalid line (expected KEY=value): ${trimmed}`);
+        return;
+      }
+      vars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
+    }
+    if (Object.keys(vars).length === 0) {
+      setError('Enter at least one KEY=value line');
+      return;
+    }
+
+    setSavingEnv(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/apps/${encodeURIComponent(name)}/env`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vars })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save env vars');
+      setEnvText('');
+      setEnvAppName(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingEnv(false);
+    }
+  }
+
   if (!token) {
     return <LoginScreen onLogin={handleLogin} />;
   }
@@ -209,11 +248,41 @@ export default function App() {
                     >
                       Rollback
                     </button>
+                    <button
+                      className="secondary"
+                      onClick={() => {
+                        setEnvAppName(envAppName === a.name ? null : a.name);
+                        setEnvText('');
+                        setError(null);
+                      }}
+                    >
+                      Env
+                    </button>
                   </td>
                 </tr>
                 {a.status === 'failed' && a.lastError && (
                   <tr key={`${a.name}-error`} className="error-row">
                     <td colSpan={6}>{a.lastError}</td>
+                  </tr>
+                )}
+                {envAppName === a.name && (
+                  <tr key={`${a.name}-env`} className="env-row">
+                    <td colSpan={6}>
+                      <div className="env-editor">
+                        <textarea
+                          placeholder={'KEY=value\nANOTHER_KEY=value'}
+                          value={envText}
+                          onChange={(e) => setEnvText(e.target.value)}
+                          rows={3}
+                        />
+                        <div className="env-editor-hint">
+                          Write-only: existing values are never shown here, only merged with what you add.
+                        </div>
+                        <button onClick={() => handleSaveEnv(a.name)} disabled={savingEnv}>
+                          {savingEnv ? 'Saving…' : 'Save env vars'}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 )}
               </>
