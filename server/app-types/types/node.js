@@ -62,8 +62,12 @@ module.exports = {
           name: app.name,
           script: startCommand,
           cwd: releasePath,
-          exec_mode: 'cluster',
-          instances: app.config.instances || 1,
+          // 'cluster' mode requires a real Node entry file it can require()
+          // internally - it can't cluster an arbitrary npm/yarn wrapper command.
+          // 'fork' works with any start command and is what config.startCommand
+          // (default 'npm start') actually needs.
+          exec_mode: 'fork',
+          instances: 1,
           env: {
             ...ctx.decryptedEnvVars,
             PORT: app.config.port,
