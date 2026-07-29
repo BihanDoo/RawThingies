@@ -94,9 +94,10 @@ async function deploy(app, ctx) {
       fs.symlinkSync(sitesAvail, sitesEnabled);
     }
 
-    // Test nginx configuration
-    execSync(`nginx -t`, { stdio: 'inherit' });
-    execSync(`systemctl reload nginx`, { stdio: 'inherit' });
+    // Test nginx configuration. Needs root - sudo is scoped to exactly these
+    // two commands via /etc/sudoers.d/raw-thingies (see provisioning/install.sh).
+    execSync(`sudo nginx -t`, { stdio: 'inherit' });
+    execSync(`sudo systemctl reload nginx`, { stdio: 'inherit' });
 
     console.log('[Deploy] Deploy successful!');
 
@@ -132,7 +133,7 @@ async function deploy(app, ctx) {
 
         // Rollback nginx config if we had a backup (skipped for brevity, but needed in a robust impl)
         try {
-          execSync(`systemctl reload nginx`, { stdio: 'inherit' });
+          execSync(`sudo systemctl reload nginx`, { stdio: 'inherit' });
         } catch (nginxErr) {
           console.error('[Deploy] Rollback nginx reload failed:', nginxErr.message);
         }

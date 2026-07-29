@@ -39,6 +39,22 @@ apt-get install -y nginx certbot python3-certbot-nginx
 systemctl enable nginx
 systemctl start nginx
 
+# Let the control-plane user (the one running Raw Thingies under PM2) write
+# nginx site configs and reload nginx, without ever running the whole API
+# as root. Scoped to exactly two commands, not general root access.
+if [ -n "$SUDO_USER" ]; then
+    chown "$SUDO_USER":root /etc/nginx/sites-available /etc/nginx/sites-enabled
+    SUDOERS_TMP=$(mktemp)
+    echo "$SUDO_USER ALL=(root) NOPASSWD: /usr/sbin/nginx -t, /usr/bin/systemctl reload nginx" > "$SUDOERS_TMP"
+    if visudo -c -f "$SUDOERS_TMP" > /dev/null 2>&1; then
+        install -m 440 "$SUDOERS_TMP" /etc/sudoers.d/raw-thingies
+        echo "Granted $SUDO_USER passwordless 'nginx -t' / 'systemctl reload nginx' via /etc/sudoers.d/raw-thingies"
+    else
+        echo "WARNING: generated sudoers rule failed validation, skipping (nginx reload will need manual sudo)"
+    fi
+    rm -f "$SUDOERS_TMP"
+fi
+
 echo "[5/9] Installing MongoDB..."
 # For Ubuntu 22.04/24.04, gnupg is needed
 apt-get install -y gnupg
