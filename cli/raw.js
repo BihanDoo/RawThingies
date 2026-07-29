@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 const db = require('../server/db');
-const { deploy } = require('../server/deploy');
 const appsService = require('../server/apps-service');
 const { spawnSync } = require('child_process');
 
@@ -12,6 +11,7 @@ async function main() {
     console.log('  apps list');
     console.log('  apps create --name <name> --type <type> --repo <repo> --domain <domain>');
     console.log('  deploy <name>');
+    console.log('  rollback <name> [--release <id>]');
     console.log('  logs <name> [--follow]');
     process.exit(1);
   }
@@ -47,17 +47,18 @@ async function main() {
     } else if (command === 'deploy') {
       const name = args[1];
       if (!name) throw new Error('Missing app name: raw deploy <name>');
-      const apps = await db.getAppsCollection();
-      const app = await apps.findOne({ name });
+      const app = await appsService.getApp(name);
       if (!app) throw new Error(`App ${name} not found`);
 
-      // Mock context with empty environment variables for now
-      // In a real flow, fetch and decrypt from vault here
-      const ctx = {
-        decryptedEnvVars: {}
-      };
+      await appsService.runDeploy(app);
+      console.log(`Deploy of ${name} succeeded.`);
+    } else if (command === 'rollback') {
+      const name = args[1];
+      if (!name) throw new Error('Missing app name: raw rollback <name> [--release <id>]');
+      const parsed = parseArgs(args.slice(2));
 
-      await deploy(app, ctx);
+      const result = await appsService.rollbackApp(name, parsed.release);
+      console.log(`Rolled back ${name} to ${result.rolledBackTo}`);
     } else if (command === 'logs') {
       const name = args[1];
       if (!name) throw new Error('Missing app name: raw logs <name>');

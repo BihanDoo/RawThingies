@@ -67,6 +67,22 @@ export default function App() {
     }
   }
 
+  async function handleRollback(name) {
+    if (!confirm(`Roll back ${name} to its previous successful release?`)) return;
+    setDeployingName(name);
+    setError(null);
+    try {
+      const res = await fetch(`/api/apps/${encodeURIComponent(name)}/rollback`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to roll back');
+      await loadApps();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeployingName(null);
+    }
+  }
+
   return (
     <div className="page">
       <h1>Raw Thingies</h1>
@@ -87,21 +103,35 @@ export default function App() {
           </thead>
           <tbody>
             {apps.map((a) => (
-              <tr key={a.name}>
-                <td>{a.name}</td>
-                <td>{a.type}</td>
-                <td>{a.domain}</td>
-                <td><StatusBadge status={a.status} /></td>
-                <td>{a.lastDeployedAt ? new Date(a.lastDeployedAt).toLocaleString() : '—'}</td>
-                <td>
-                  <button
-                    onClick={() => handleDeploy(a.name)}
-                    disabled={deployingName === a.name || a.status === 'deploying'}
-                  >
-                    {a.status === 'deploying' || deployingName === a.name ? 'Deploying…' : 'Deploy'}
-                  </button>
-                </td>
-              </tr>
+              <>
+                <tr key={a.name}>
+                  <td>{a.name}</td>
+                  <td>{a.type}</td>
+                  <td>{a.domain}</td>
+                  <td><StatusBadge status={a.status} /></td>
+                  <td>{a.lastDeployedAt ? new Date(a.lastDeployedAt).toLocaleString() : '—'}</td>
+                  <td className="actions">
+                    <button
+                      onClick={() => handleDeploy(a.name)}
+                      disabled={deployingName === a.name || a.status === 'deploying'}
+                    >
+                      {a.status === 'deploying' || deployingName === a.name ? 'Deploying…' : 'Deploy'}
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={() => handleRollback(a.name)}
+                      disabled={deployingName === a.name || a.status === 'deploying'}
+                    >
+                      Rollback
+                    </button>
+                  </td>
+                </tr>
+                {a.status === 'failed' && a.lastError && (
+                  <tr key={`${a.name}-error`} className="error-row">
+                    <td colSpan={6}>{a.lastError}</td>
+                  </tr>
+                )}
+              </>
             ))}
             {apps.length === 0 && (
               <tr>

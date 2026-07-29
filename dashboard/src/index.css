@@ -43,6 +43,23 @@ button {
 
 button:disabled { background: #3b4252; cursor: not-allowed; }
 
+.actions { display: flex; gap: 0.4rem; }
+
+button.secondary {
+  background: transparent;
+  border: 1px solid #3b4252;
+  color: #b7b7b7;
+}
+button.secondary:disabled { border-color: #262a33; color: #55596a; }
+
+.error-row td {
+  background: #2a1414;
+  color: #fca5a5;
+  font-size: 0.8rem;
+  font-family: ui-monospace, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
 .status {
   padding: 0.15rem 0.55rem;
   border-radius: 999px;

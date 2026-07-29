@@ -41,6 +41,24 @@ app.post('/api/apps/:name/deploy', async (req, res) => {
   }
 });
 
+app.get('/api/apps/:name/releases', async (req, res) => {
+  try {
+    res.json(await appsService.listReleases(req.params.name));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Rollback is comparatively fast (symlink swap + reload + nginx, no
+// clone/install/build), so unlike deploy this stays synchronous.
+app.post('/api/apps/:name/rollback', async (req, res) => {
+  try {
+    res.json(await appsService.rollbackApp(req.params.name, req.body && req.body.releaseId));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Serve the built dashboard (dashboard/dist) if it's been built.
 const distPath = path.join(__dirname, '..', 'dashboard', 'dist');
 if (fs.existsSync(distPath)) {

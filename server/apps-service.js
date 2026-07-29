@@ -1,6 +1,7 @@
+const { ObjectId } = require('mongodb');
 const db = require('./db');
 const appTypes = require('./app-types/registry');
-const { deploy } = require('./deploy');
+const { deploy, rollbackTo } = require('./deploy');
 
 async function createApp({ name, type, repo, branch, domain }) {
   if (!name || !type || !domain) {
@@ -47,6 +48,63 @@ async function getApp(name) {
   return apps.findOne({ name });
 }
 
+async function listReleases(name) {
+  const apps = await db.getAppsCollection();
+  const app = await apps.findOne({ name });
+  if (!app) throw new Error(`App ${name} not found`);
+  const releases = await db.getReleasesCollection();
+  return releases.find({ appId: app._id }).sort({ deployedAt: -1 }).toArray();
+}
+
+// Runs an instrumented deploy: creates a `releases` record up front, streams
+// each pipeline step into `deploy_logs`, and updates both the release and
+// the app document with the outcome. Shared by the CLI (awaits this directly,
+// so it blocks and shows real-time console output) and the API (fires it
+// without awaiting - see triggerDeploy).
+async function runDeploy(app) {
+  const apps = await db.getAppsCollection();
+  const releases = await db.getReleasesCollection();
+  const deployLogs = await db.getDeployLogsCollection();
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const { insertedId: releaseId } = await releases.insertOne({
+    appId: app._id,
+    commitSha: null,
+    commitMessage: null,
+    releasePath: `/var/www/apps/${app.name}/releases/${timestamp}`,
+    status: 'building',
+    deployedAt: new Date(),
+    deployedBy: null
+  });
+
+  const onLog = (stepName, output) => {
+    deployLogs.insertOne({
+      appId: app._id,
+      releaseId,
+      stepName,
+      output,
+      timestamp: new Date()
+    }).catch((err) => console.error('[apps-service] failed to write deploy log:', err.message));
+  };
+
+  try {
+    const result = await deploy(app, { decryptedEnvVars: {}, releaseTimestamp: timestamp, onLog });
+    await releases.updateOne({ _id: releaseId }, {
+      $set: { status: 'success', commitSha: result.commitSha || null }
+    });
+    await apps.updateOne({ name: app.name }, {
+      $set: { status: 'running', lastDeployedAt: new Date(), lastError: null, updatedAt: new Date() }
+    });
+    return result;
+  } catch (err) {
+    await releases.updateOne({ _id: releaseId }, { $set: { status: 'failed' } });
+    await apps.updateOne({ name: app.name }, {
+      $set: { status: 'failed', lastError: err.message, updatedAt: new Date() }
+    });
+    throw err;
+  }
+}
+
 // Fires the deploy in the background and returns immediately - an HTTP request
 // shouldn't have to stay open for the minutes a real deploy can take. Callers
 // (the dashboard) poll listApps()/getApp() to watch `status` change.
@@ -58,15 +116,54 @@ async function triggerDeploy(name) {
 
   await apps.updateOne({ name }, { $set: { status: 'deploying', updatedAt: new Date() } });
 
-  deploy(app, { decryptedEnvVars: {} })
-    .then(() => apps.updateOne({ name }, {
-      $set: { status: 'running', lastDeployedAt: new Date(), lastError: null, updatedAt: new Date() }
-    }))
-    .catch((err) => apps.updateOne({ name }, {
-      $set: { status: 'failed', lastError: err.message, updatedAt: new Date() }
-    }));
+  runDeploy(app).catch(() => {
+    // runDeploy already persisted status/lastError - nothing further to do here,
+    // just prevent this from becoming an unhandled rejection.
+  });
 
   return { started: true };
 }
 
-module.exports = { createApp, listApps, getApp, triggerDeploy };
+// Rolls back to an already-built, previously-successful release (brief
+// Section 6.3). Defaults to the most recent successful release that isn't
+// the one currently live; pass releaseId to target a specific one.
+async function rollbackApp(name, releaseId) {
+  const apps = await db.getAppsCollection();
+  const releases = await db.getReleasesCollection();
+  const app = await apps.findOne({ name });
+  if (!app) throw new Error(`App ${name} not found`);
+  if (app.status === 'deploying') throw new Error(`App ${name} is currently deploying, try again after it finishes`);
+
+  let target;
+  if (releaseId) {
+    target = await releases.findOne({ _id: new ObjectId(releaseId), appId: app._id, status: 'success' });
+    if (!target) throw new Error('Release not found, or was not a successful deploy');
+  } else {
+    const recentSuccesses = await releases
+      .find({ appId: app._id, status: 'success' })
+      .sort({ deployedAt: -1 })
+      .limit(2)
+      .toArray();
+    if (recentSuccesses.length < 2) {
+      throw new Error(`No previous successful release to roll back to for ${name}`);
+    }
+    target = recentSuccesses[1];
+  }
+
+  await apps.updateOne({ name }, { $set: { status: 'deploying', updatedAt: new Date() } });
+
+  try {
+    await rollbackTo(app, target.releasePath, { decryptedEnvVars: {} });
+    await apps.updateOne({ name }, {
+      $set: { status: 'running', lastDeployedAt: new Date(), lastError: null, updatedAt: new Date() }
+    });
+    return { rolledBackTo: target.releasePath };
+  } catch (err) {
+    await apps.updateOne({ name }, {
+      $set: { status: 'failed', lastError: err.message, updatedAt: new Date() }
+    });
+    throw err;
+  }
+}
+
+module.exports = { createApp, listApps, getApp, listReleases, runDeploy, triggerDeploy, rollbackApp };
